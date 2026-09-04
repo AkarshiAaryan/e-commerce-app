@@ -102,6 +102,9 @@ exports.createStripeSession = async (req, res, next) => {
       metadata: { orderId: String(order._id) }
     });
 
+    // persist stripe session id on the order for later verification and idempotency
+    await Order.findByIdAndUpdate(order._id, { $set: { 'paymentDetails.sessionId': session.id } });
+
     res.json({ success: true, url: session.url, sessionId: session.id });
   } catch (err) {
     next(err);
@@ -117,11 +120,19 @@ exports.verifyStripe = async (req, res, next) => {
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (session.payment_status === 'paid') {
-      const order = await Order.findById(orderId);
-      if (!order) return res.status(404).json({ message: 'Order not found' });
-      order.payment = true;
-      await order.save();
-      return res.json({ success: true, order });
+      // Idempotent update: only mark as paid if not already paid
+      const updated = await Order.findOneAndUpdate(
+        { _id: orderId, payment: { $ne: true } },
+        { $set: { payment: true, paymentDetails: { provider: 'stripe', sessionId: session.id }, paidAt: new Date() } },
+        { new: true }
+      );
+      // If updated is null, the order was already marked paid or not found
+      if (!updated) {
+        const existing = await Order.findById(orderId);
+        if (!existing) return res.status(404).json({ message: 'Order not found' });
+        return res.json({ success: true, order: existing, message: 'Order already marked paid' });
+      }
+      return res.json({ success: true, order: updated });
     }
     res.status(400).json({ message: 'Payment not completed' });
   } catch (err) {
@@ -161,11 +172,18 @@ exports.verifyRazorpay = async (req, res, next) => {
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !orderId) return res.status(400).json({ message: 'Missing verification parameters' });
     const generated_signature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex');
     if (generated_signature !== razorpay_signature) return res.status(400).json({ message: 'Invalid signature' });
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    order.payment = true;
-    await order.save();
-    res.json({ success: true, order });
+    // Idempotent update: mark paid only if not already paid
+    const updated = await Order.findOneAndUpdate(
+      { _id: orderId, payment: { $ne: true } },
+      { $set: { payment: true, paymentDetails: { provider: 'razorpay', razorpay_order_id, razorpay_payment_id }, paidAt: new Date() } },
+      { new: true }
+    );
+    if (!updated) {
+      const existing = await Order.findById(orderId);
+      if (!existing) return res.status(404).json({ message: 'Order not found' });
+      return res.json({ success: true, order: existing, message: 'Order already marked paid' });
+    }
+    res.json({ success: true, order: updated });
   } catch (err) {
     next(err);
   }
@@ -190,11 +208,16 @@ exports.stripeWebhook = async (req, res) => {
       const session = event.data.object;
       const orderId = session.metadata && session.metadata.orderId;
       if (orderId) {
-        const order = await Order.findById(orderId);
-        if (order) {
-          order.payment = true;
-          await order.save();
+        // Idempotent update: only mark paid if not already
+        const updated = await Order.findOneAndUpdate(
+          { _id: orderId, payment: { $ne: true } },
+          { $set: { payment: true, paymentDetails: { provider: 'stripe', sessionId: session.id }, paidAt: new Date() } },
+          { new: true }
+        );
+        if (updated) {
           console.log('Order marked paid via webhook', orderId);
+        } else {
+          console.log('Webhook received but order already marked paid or not found', orderId);
         }
       }
     }

@@ -27,12 +27,14 @@ const OrderSchema = new mongoose.Schema({
   address: { type: AddressSchema, required: true },
   paymentMethod: { type: String, required: true },
   payment: { type: Boolean, default: false },
+  paymentDetails: { type: Object, default: {} },
+  paidAt: { type: Date },
   status: { type: String, default: 'Order Placed' },
   date: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model('Order', OrderSchema);
-
 // Indexes for efficient queries
 OrderSchema.index({ userId: 1, date: -1 });
 OrderSchema.index({ status: 1 });
+
+module.exports = mongoose.model('Order', OrderSchema);

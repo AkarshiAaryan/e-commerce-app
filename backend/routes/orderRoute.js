@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const { body } = require('express-validator');
 const orderController = require('../controllers/orderController');
 const auth = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
+const validate = require('../middlewares/validate');
 
 // Place order (COD)
-router.post('/place', auth, orderController.placeOrderCOD);
+router.post('/place', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.placeOrderCOD);
 
 // User's orders
 router.post('/userorders', auth, orderController.userOrders);
@@ -17,11 +19,11 @@ router.post('/list', auth, adminAuth, orderController.adminListOrders);
 router.post('/status', auth, adminAuth, orderController.adminUpdateStatus);
 
 // Stripe
-router.post('/stripe', auth, orderController.createStripeSession);
-router.post('/verifyStripe', orderController.verifyStripe);
+router.post('/stripe', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.createStripeSession);
+router.post('/verifyStripe', [body('sessionId').notEmpty(), body('orderId').isMongoId()], validate, orderController.verifyStripe);
 
 // Razorpay
-router.post('/razorpay', auth, orderController.createRazorpayOrder);
-router.post('/verifyRazorpay', orderController.verifyRazorpay);
+router.post('/razorpay', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.createRazorpayOrder);
+router.post('/verifyRazorpay', [body('razorpay_order_id').notEmpty(), body('razorpay_payment_id').notEmpty(), body('razorpay_signature').notEmpty(), body('orderId').isMongoId()], validate, orderController.verifyRazorpay);
 
 module.exports = router;
