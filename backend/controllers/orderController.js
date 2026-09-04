@@ -170,3 +170,38 @@ exports.verifyRazorpay = async (req, res, next) => {
     next(err);
   }
 };
+
+
+exports.stripeWebhook = async (req, res) => {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) return res.status(500).send('Stripe not configured');
+    const stripe = stripeLib(process.env.STRIPE_SECRET_KEY);
+    const sig = req.headers['stripe-signature'];
+    const raw = req.body; // raw body as Buffer
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(raw, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+      console.error('Webhook signature verification failed:', err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const orderId = session.metadata && session.metadata.orderId;
+      if (orderId) {
+        const order = await Order.findById(orderId);
+        if (order) {
+          order.payment = true;
+          await order.save();
+          console.log('Order marked paid via webhook', orderId);
+        }
+      }
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('stripeWebhook error', err);
+    res.status(500).send('Webhook handler error');
+  }
+}

@@ -10,6 +10,12 @@ connectDB();
 const app = express();
 
 app.use(cors());
+
+// Stripe webhook endpoint requires the raw body to verify signature.
+// Define the route with express.raw before the JSON body parser is applied.
+const orderController = require('./controllers/orderController');
+app.post('/api/order/stripe-webhook', express.raw({ type: 'application/json' }), orderController.stripeWebhook);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

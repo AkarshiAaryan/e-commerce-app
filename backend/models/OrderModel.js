@@ -32,3 +32,7 @@ const OrderSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('Order', OrderSchema);
+
+// Indexes for efficient queries
+OrderSchema.index({ userId: 1, date: -1 });
+OrderSchema.index({ status: 1 });

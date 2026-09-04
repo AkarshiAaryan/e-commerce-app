@@ -20,9 +20,18 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage });
+// Accept images only and limit size to 5MB each
+const fileFilter = (req, file, cb) => {
+  if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+    return cb(new Error('Only image uploads are allowed'))
+  }
+  cb(null, true)
+}
 
-router.post('/add', auth, adminAuth, upload.array('images', 8), productController.addProduct);
+const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Allow up to 4 images per product
+router.post('/add', auth, adminAuth, upload.array('images', 4), productController.addProduct);
 router.post('/remove', auth, adminAuth, productController.removeProduct);
 router.post('/list', productController.listProducts);
 router.post('/categories', productController.listCategories);
