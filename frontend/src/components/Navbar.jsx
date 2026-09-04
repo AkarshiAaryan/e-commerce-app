@@ -42,6 +42,9 @@ const Navbar = () => {
           </NavLink>
         </li>
       </ul>
+       <div className='hidden sm:block'>
+         <a href='/admin/login' className='text-sm text-gray-700 ml-4'>ADMIN</a>
+       </div>
 
       <div className="flex items-center gap-6">
         <img src={assets.search_icon} className="w-5 cursor-pointer" alt="Search" />
