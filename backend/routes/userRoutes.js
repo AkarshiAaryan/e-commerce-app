@@ -7,9 +7,9 @@ router.post('/register', userController.register);
 router.post('/login', userController.login);
 router.post('/admin', userController.adminLogin);
 
-// Example protected route
-router.get('/me', auth, async (req, res) => {
-  res.json({ userId: req.userId });
-});
+router.get('/me', auth, userController.getProfile);
+router.put('/profile', auth, userController.updateProfile);
+router.get('/cart', auth, userController.getCart);
+router.put('/cart', auth, userController.updateCart);
 
 module.exports = router;

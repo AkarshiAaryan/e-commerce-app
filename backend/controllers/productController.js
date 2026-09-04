@@ -8,15 +8,17 @@ const uploadToCloudinary = async (filePath) => {
   return await cloudinary.uploader.upload(filePath, { folder: 'ecommerce/products' });
 };
 
+const getProductId = (req) => {
+  return req.body?.id || req.params?.id || req.query?.id;
+};
+
 exports.addProduct = async (req, res, next) => {
   try {
-    // multer will attach files in req.files
     const { name, description, price, category, subCategory, sizes, bestSeller } = req.body;
     if (!name || !description || !price || !category || !subCategory) {
       return res.status(400).json({ message: 'Missing required product fields' });
     }
 
-    // parse sizes: allow JSON array or comma-separated string
     let sizesArr = [];
     if (sizes) {
       try {
@@ -36,14 +38,11 @@ exports.addProduct = async (req, res, next) => {
 
     const imageUrls = [];
     for (const f of imageFiles) {
-      // upload via cloudinary if configured; otherwise keep local path
       if (configured) {
         const result = await uploadToCloudinary(f.path);
         imageUrls.push(result.secure_url);
-        // remove local file
         try { fs.unlinkSync(f.path); } catch (e) {}
       } else {
-        // keep relative path for fallback
         imageUrls.push(path.relative(process.cwd(), f.path));
       }
     }
@@ -68,11 +67,11 @@ exports.addProduct = async (req, res, next) => {
 
 exports.removeProduct = async (req, res, next) => {
   try {
-    const { id } = req.body;
+    const id = getProductId(req);
     if (!id) return res.status(400).json({ message: 'Product id required' });
     const prod = await Product.findById(id);
     if (!prod) return res.status(404).json({ message: 'Product not found' });
-    await prod.remove();
+    await prod.deleteOne();
     res.json({ success: true, message: 'Product removed' });
   } catch (err) {
     next(err);
@@ -81,7 +80,37 @@ exports.removeProduct = async (req, res, next) => {
 
 exports.listProducts = async (req, res, next) => {
   try {
-    const products = await Product.find({}).sort({ date: -1 });
+    const { category, subCategory, bestSeller } = req.body || {};
+    const filters = {};
+
+    if (category) filters.category = category;
+    if (subCategory) filters.subCategory = subCategory;
+    if (bestSeller !== undefined) filters.bestSeller = bestSeller === true || bestSeller === 'true' || bestSeller === '1';
+
+    const products = await Product.find(filters).sort({ date: -1 });
+    res.json({ success: true, products });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.listCategories = async (req, res, next) => {
+  try {
+    const categories = await Product.distinct('category');
+    res.json({ success: true, categories: categories.filter(Boolean) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.searchProducts = async (req, res, next) => {
+  try {
+    const { q } = req.body || {};
+    if (!q || !q.trim()) {
+      return res.json({ success: true, products: [] });
+    }
+    const regex = new RegExp(q.trim(), 'i');
+    const products = await Product.find({ $or: [{ name: regex }, { description: regex }, { category: regex }, { subCategory: regex }] }).sort({ date: -1 });
     res.json({ success: true, products });
   } catch (err) {
     next(err);
@@ -90,7 +119,7 @@ exports.listProducts = async (req, res, next) => {
 
 exports.singleProduct = async (req, res, next) => {
   try {
-    const { id } = req.body;
+    const id = getProductId(req);
     if (!id) return res.status(400).json({ message: 'Product id required' });
     const prod = await Product.findById(id);
     if (!prod) return res.status(404).json({ message: 'Product not found' });

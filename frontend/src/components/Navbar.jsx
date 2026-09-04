@@ -1,9 +1,11 @@
 import React, { useState } from 'react'
 import { assets } from '../assets/frontend_assets/assets'
 import { Link, NavLink } from 'react-router-dom'
+import { useShop } from '../context/ShopContext'
 
 const Navbar = () => {
   const [visible, setVisible] = useState(false)
+  const { cartCount } = useShop()
 
   const navItemClass = ({ isActive }) =>
     `flex flex-col items-center gap-1 text-sm ${isActive ? 'text-black' : 'text-gray-700'}`
@@ -58,7 +60,7 @@ const Navbar = () => {
         <Link className="relative" to="/cart">
           <img src={assets.cart_icon} className="w-5 min-w-[20px]" alt="Cart" />
           <span className="absolute -right-1 -bottom-1 w-4 h-4 text-[8px] leading-4 bg-black text-white rounded-full text-center">
-            1
+            {cartCount || 0}
           </span>
         </Link>
 
@@ -72,7 +74,6 @@ const Navbar = () => {
         </button>
       </div>
 
-      {/* Sidebar menu for small screens */}
       <div className={`absolute top-0 right-0 bottom-0 z-50 overflow-hidden bg-white transition-all duration-300 ${visible ? 'w-full' : 'w-0'}`}>
         <div className='flex flex-col text-gray-600'>
           <button onClick={() => setVisible(false)} className='flex items-center gap-4 p-3 text-left cursor-pointer'>
