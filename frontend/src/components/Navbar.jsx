@@ -5,7 +5,8 @@ import { useShop } from '../context/ShopContext'
 
 const Navbar = () => {
   const [visible, setVisible] = useState(false)
-  const { cartCount } = useShop()
+  const { cartCount, logout } = useShop()
+  const navigate = useNavigate()
 
   const navItemClass = ({ isActive }) =>
     `flex flex-col items-center gap-1 text-sm ${isActive ? 'text-black' : 'text-gray-700'}`
@@ -55,7 +56,7 @@ const Navbar = () => {
             <div className="flex flex-col gap-2 w-40 py-3 px-4 bg-slate-100 text-gray-500 rounded shadow-md">
               <Link to="/profile" className="cursor-pointer hover:text-black">My Profile</Link>
               <Link to="/orders" className="cursor-pointer hover:text-black">Orders</Link>
-              <button className="text-left cursor-pointer hover:text-black">Logout</button>
+              <button onClick={() => { logout(); navigate('/'); }} className="text-left cursor-pointer hover:text-black">Logout</button>
             </div>
           </div>
         </div>
@@ -90,7 +91,7 @@ const Navbar = () => {
           <NavLink onClick={() => setVisible(false)} className='py-4 px-6 border-b border-gray-200 text-sm font-medium' to='/cart'>CART</NavLink>
           <NavLink onClick={() => setVisible(false)} className='py-4 px-6 border-b border-gray-200 text-sm font-medium' to='/profile'>PROFILE</NavLink>
           <NavLink onClick={() => setVisible(false)} className='py-4 px-6 border-b border-gray-200 text-sm font-medium' to='/orders'>ORDERS</NavLink>
-          <button onClick={() => setVisible(false)} className='py-4 px-6 text-left text-sm font-medium text-gray-700 hover:bg-slate-100'>LOGOUT</button>
+          <button onClick={() => { setVisible(false); logout(); navigate('/'); }} className='py-4 px-6 text-left text-sm font-medium text-gray-700 hover:bg-slate-100'>LOGOUT</button>
         </div>
       </div>
     </header>

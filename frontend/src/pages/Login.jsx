@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useShop } from '../context/ShopContext'
 import { useNavigate } from 'react-router-dom'
 import { apiPost } from '../utils/api'
 
@@ -7,6 +8,7 @@ const Login = () => {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const navigate = useNavigate()
+  const { syncLocalCartToServer } = useShop()
 
   const submit = async (e) => {
     e.preventDefault()
@@ -15,6 +17,7 @@ const Login = () => {
       const res = await apiPost('/user/login', { email, password })
       if (res && res.token) {
         localStorage.setItem('token', res.token)
+        try { await syncLocalCartToServer() } catch (e) { }
         navigate('/')
       } else {
         setError('Login failed')

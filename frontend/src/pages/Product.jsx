@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiPost } from '../utils/api'
 import { useShop } from '../context/ShopContext'
+import { toast } from 'react-toastify'
 
 const Product = () => {
   const { productId } = useParams()
@@ -27,6 +28,23 @@ const Product = () => {
 
     if (productId) load()
   }, [productId])
+
+  // related products
+  const [related, setRelated] = useState([])
+  useEffect(() => {
+    const loadRelated = async () => {
+      try {
+        if (!product) return
+        const res = await apiPost('/product/list', { category: product.category, subCategory: product.subCategory })
+        const list = (res && res.products) || []
+        const filtered = list.filter((p) => p._id !== product._id).slice(0, 5)
+        setRelated(filtered)
+      } catch (err) {
+        // ignore
+      }
+    }
+    loadRelated()
+  }, [product])
 
   if (loading) return <div className="py-10">Loading product...</div>
   if (error) return <div className="py-10 text-red-600">{error}</div>
@@ -78,7 +96,7 @@ const Product = () => {
               type="button"
               onClick={() => {
                 if (!selectedSize && (product.sizes || []).length) {
-                  setError('Please select a size')
+                  toast.error('Please select a size')
                   return
                 }
                 addToCart(product, selectedSize, quantity)
@@ -99,6 +117,21 @@ const Product = () => {
           </div>
         </div>
       </div>
+      {related.length > 0 && (
+        <div className="mt-12">
+          <h3 className="text-xl font-semibold mb-4">Related products</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {related.map((p) => (
+              <div key={p._id} className="border p-2">
+                <img src={p.images && p.images[0]} alt={p.name} className="w-full h-36 object-cover mb-2" />
+                <p className="font-medium text-sm">{p.name}</p>
+                <p className="text-sm">₹{p.price}</p>
+                <Link to={`/product/${p._id}`} className="text-blue-600 text-sm">View</Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
