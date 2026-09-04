@@ -20,6 +20,7 @@ const PlaceOrder = () => {
   const [form, setForm] = useState(defaultForm)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState('COD')
 
   if (!cartItems.length) {
     return (
@@ -50,13 +51,62 @@ const PlaceOrder = () => {
         })),
         address: form,
         amount: cartTotal,
-        paymentMethod: 'COD',
+        paymentMethod,
       }
 
-      const res = await apiPost('/order/place', payload)
-      if (res && res.success) {
-        clearCart()
-        navigate('/orders')
+      if (paymentMethod === 'COD') {
+        const res = await apiPost('/order/place', payload)
+        if (res && res.success) {
+          clearCart()
+          navigate('/orders')
+        }
+      } else if (paymentMethod === 'Stripe') {
+        const res = await apiPost('/order/stripe', { items: payload.items, address: payload.address })
+        if (res && res.url) {
+          window.location.href = res.url
+        } else {
+          throw new Error((res && res.message) || 'Stripe initialization failed')
+        }
+      } else if (paymentMethod === 'Razorpay') {
+        const res = await apiPost('/order/razorpay', { items: payload.items, address: payload.address })
+        if (!(res && res.success && res.razorOrder)) throw new Error((res && res.message) || 'Razorpay init failed')
+
+        const { razorOrder, key, orderId } = res
+        const options = {
+          key: key,
+          amount: razorOrder.amount,
+          currency: razorOrder.currency,
+          name: 'Forever Store',
+          description: 'Order payment',
+          order_id: razorOrder.id,
+          handler: async function (response) {
+            try {
+              const verifyRes = await apiPost('/order/verifyRazorpay', {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                orderId,
+              })
+              if (verifyRes && verifyRes.success) {
+                clearCart()
+                navigate('/orders')
+              } else {
+                throw new Error((verifyRes && verifyRes.message) || 'Payment verification failed')
+              }
+            } catch (err) {
+              setError(err.message || 'Payment verification error')
+            }
+          },
+          modal: { ondismiss: function () { } }
+        }
+
+        const script = document.createElement('script')
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+        script.onload = () => {
+          const rzp = new window.Razorpay(options)
+          rzp.open()
+        }
+        document.body.appendChild(script)
       }
     } catch (err) {
       setError(err.message || 'Unable to place order')

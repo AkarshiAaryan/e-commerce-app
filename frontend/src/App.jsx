@@ -16,6 +16,8 @@ import Register from './pages/Register'
 import PlaceOrder from './pages/PlaceOrder'
 import Orders from './pages/Orders'
 import Profile from './pages/Profile'
+import PaymentSuccess from './pages/PaymentSuccess'
+import PaymentCancel from './pages/PaymentCancel'
 import Navbar from './components/Navbar'
 
 const App = () => {
