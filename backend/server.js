@@ -1,52 +1,31 @@
-const express = require('express');
-const dotenv = require('dotenv');
-const cors = require('cors');
-const connectDB = require('./config/db');
-const errorHandler = require('./utils/errorHandler');
+import express from 'express';
+import cors from 'cors';
+import 'dotenv/config';
+import connectDB from './config/mongodb.js';
+import connectCloudinary from './config/cloudinary.js';
+import userRouter from './routes/userRoute.js';
+import productRouter from './routes/productRoute.js';
+import cartRouter from './routes/cartRoute.js';
+import orderRouter from './routes/orderRoute.js';
 
-dotenv.config();
-connectDB();
-
+// App Config
 const app = express();
+const port = process.env.PORT || 4000;
+connectDB();
+connectCloudinary();
 
-// Configure CORS from environment (comma-separated list). If none provided, allow all origins (useful for dev).
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-const corsOptions = {
-  origin: function(origin, callback) {
-    // Allow non-browser tools like curl or server-to-server requests (no origin)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.length === 0 || allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
-    return callback(new Error('CORS policy: Origin not allowed'));
-  },
-  credentials: true,
-};
-app.use(cors(corsOptions));
+// middlewares
+app.use(express.json());
+app.use(cors());
 
-// Stripe webhook endpoint requires the raw body to verify signature.
-// Define the route with express.raw before the JSON body parser is applied.
-const orderController = require('./controllers/orderController');
-app.post('/api/order/stripe-webhook', express.raw({ type: 'application/json' }), orderController.stripeWebhook);
+// api endpoints
+app.use('/api/user', userRouter);
+app.use('/api/product', productRouter);
+app.use('/api/cart', cartRouter);
+app.use('/api/order', orderRouter);
 
-// JSON / URL-encoded body size limits (configurable via REQUEST_SIZE_LIMIT env, default 500kb)
-const requestSizeLimit = process.env.REQUEST_SIZE_LIMIT || '500kb';
-app.use(express.json({ limit: requestSizeLimit }));
-app.use(express.urlencoded({ extended: true, limit: requestSizeLimit }));
-
-// Routes
-const userRoutes = require('./routes/userRoutes');
-app.use('/api/user', userRoutes);
-const productRoutes = require('./routes/productRoute');
-app.use('/api/product', productRoutes);
-const orderRoutes = require('./routes/orderRoute');
-app.use('/api/order', orderRoutes);
-
-// Health
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-
-// Error handler
-app.use(errorHandler);
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
+app.get('/', (req, res) => {
+    res.send("API Working");
 });
+
+app.listen(port, () => console.log('Server started on PORT : ' + port));

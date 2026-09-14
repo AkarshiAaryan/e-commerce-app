@@ -1,130 +1,79 @@
-const Product = require('../models/ProductModel');
-const { cloudinary, configured } = require('../utils/cloudinary');
-const fs = require('fs');
-const path = require('path');
+import { v2 as cloudinary } from 'cloudinary';
+import productModel from '../models/productModel.js';
 
-const uploadToCloudinary = async (filePath) => {
-  if (!configured) throw new Error('Cloudinary not configured');
-  return await cloudinary.uploader.upload(filePath, { folder: 'ecommerce/products' });
-};
+// function for add product
+const addProduct = async (req, res) => {
+    try {
+        const { name, description, price, category, subCategory, sizes, bestseller } = req.body;
 
-const getProductId = (req) => {
-  return req.body?.id || req.params?.id || req.query?.id;
-};
+        const image1 = req.files.image1 && req.files.image1[0];
+        const image2 = req.files.image2 && req.files.image2[0];
+        const image3 = req.files.image3 && req.files.image3[0];
+        const image4 = req.files.image4 && req.files.image4[0];
 
-exports.addProduct = async (req, res, next) => {
-  try {
-    const { name, description, price, category, subCategory, sizes, bestSeller } = req.body;
-    if (!name || !description || !price || !category || !subCategory) {
-      return res.status(400).json({ message: 'Missing required product fields' });
+        const images = [image1, image2, image3, image4].filter((item) => item !== undefined);
+
+        let imagesUrl = await Promise.all(
+            images.map(async (item) => {
+                let result = await cloudinary.uploader.upload(item.path, { resource_type: 'image' });
+                return result.secure_url;
+            })
+        );
+
+        const productData = {
+            name,
+            description,
+            category,
+            price: Number(price),
+            subCategory,
+            bestseller: bestseller === "true" || bestseller === true ? true : false,
+            sizes: JSON.parse(sizes),
+            image: imagesUrl,
+            date: Date.now()
+        };
+
+        const product = new productModel(productData);
+        await product.save();
+
+        res.json({ success: true, message: "Product Added" });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
+};
 
-    let sizesArr = [];
-    if (sizes) {
-      try {
-        sizesArr = typeof sizes === 'string' && sizes.trim().startsWith('[') ? JSON.parse(sizes) : sizes.split(',').map(s => s.trim()).filter(Boolean);
-      } catch (e) {
-        sizesArr = sizes.split(',').map(s => s.trim()).filter(Boolean);
-      }
+// function for list product
+const listProducts = async (req, res) => {
+    try {
+        const products = await productModel.find({});
+        res.json({ success: true, products });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
+};
 
-    const priceNum = Number(price);
-    const best = bestSeller === 'true' || bestSeller === true || bestSeller === '1';
-
-    const imageFiles = req.files || [];
-    if (imageFiles.length === 0) {
-      return res.status(400).json({ message: 'At least one image is required' });
+// function for removing product
+const removeProduct = async (req, res) => {
+    try {
+        await productModel.findByIdAndDelete(req.body.id);
+        res.json({ success: true, message: "Product Removed" });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
+};
 
-    const imageUrls = [];
-    for (const f of imageFiles) {
-      if (configured) {
-        const result = await uploadToCloudinary(f.path);
-        imageUrls.push(result.secure_url);
-        try { fs.unlinkSync(f.path); } catch (e) {}
-      } else {
-        imageUrls.push(path.relative(process.cwd(), f.path));
-      }
+// function for single product info
+const singleProduct = async (req, res) => {
+    try {
+        const { productId } = req.body;
+        const product = await productModel.findById(productId);
+        res.json({ success: true, product });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
-
-    const product = await Product.create({
-      name,
-      description,
-      price: priceNum,
-      category,
-      subCategory,
-      sizes: sizesArr,
-      images: imageUrls,
-      bestSeller: best,
-      date: Date.now(),
-    });
-
-    res.status(201).json({ success: true, product });
-  } catch (err) {
-    next(err);
-  }
 };
 
-exports.removeProduct = async (req, res, next) => {
-  try {
-    const id = getProductId(req);
-    if (!id) return res.status(400).json({ message: 'Product id required' });
-    const prod = await Product.findById(id);
-    if (!prod) return res.status(404).json({ message: 'Product not found' });
-    await prod.deleteOne();
-    res.json({ success: true, message: 'Product removed' });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.listProducts = async (req, res, next) => {
-  try {
-    const { category, subCategory, bestSeller } = req.body || {};
-    const filters = {};
-
-    if (category) filters.category = category;
-    if (subCategory) filters.subCategory = subCategory;
-    if (bestSeller !== undefined) filters.bestSeller = bestSeller === true || bestSeller === 'true' || bestSeller === '1';
-
-    const products = await Product.find(filters).sort({ date: -1 });
-    res.json({ success: true, products });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.listCategories = async (req, res, next) => {
-  try {
-    const categories = await Product.distinct('category');
-    res.json({ success: true, categories: categories.filter(Boolean) });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.searchProducts = async (req, res, next) => {
-  try {
-    const { q } = req.body || {};
-    if (!q || !q.trim()) {
-      return res.json({ success: true, products: [] });
-    }
-    const regex = new RegExp(q.trim(), 'i');
-    const products = await Product.find({ $or: [{ name: regex }, { description: regex }, { category: regex }, { subCategory: regex }] }).sort({ date: -1 });
-    res.json({ success: true, products });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.singleProduct = async (req, res, next) => {
-  try {
-    const id = getProductId(req);
-    if (!id) return res.status(400).json({ message: 'Product id required' });
-    const prod = await Product.findById(id);
-    if (!prod) return res.status(404).json({ message: 'Product not found' });
-    res.json({ success: true, product: prod });
-  } catch (err) {
-    next(err);
-  }
-};
+export { listProducts, addProduct, removeProduct, singleProduct };

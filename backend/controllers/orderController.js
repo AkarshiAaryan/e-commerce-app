@@ -1,230 +1,217 @@
-const Order = require('../models/OrderModel');
-const Product = require('../models/ProductModel');
-const mongoose = require('mongoose');
-const stripeLib = require('stripe');
-const Razorpay = require('razorpay');
-const crypto = require('crypto');
+import orderModel from '../models/orderModel.js';
+import userModel from '../models/userModel.js';
+import Stripe from 'stripe';
+import razorpay from 'razorpay';
 
-const ALLOWED_STATUSES = ['Order Placed', 'Packing', 'Shipped', 'Out for Delivery', 'Delivered'];
+// global variables
+const currency = 'usd';
+const deliveryCharge = 10;
 
-const getServerTotalAndSnapshots = async (items) => {
-  if (!Array.isArray(items) || items.length === 0) throw new Error('Cart items required');
-  let total = 0;
-  const snapshots = [];
-  for (const it of items) {
-    if (!it.productId || !mongoose.Types.ObjectId.isValid(it.productId)) throw new Error('Invalid productId');
-    const prod = await Product.findById(it.productId);
-    if (!prod) throw new Error(`Product not found: ${it.productId}`);
-    const qty = Number(it.quantity) || 1;
-    if (qty <= 0) throw new Error('Invalid quantity');
-    total += prod.price * qty;
-    snapshots.push({ productId: prod._id, name: prod.name, image: (prod.images && prod.images[0]) || '', price: prod.price, size: it.size || '', quantity: qty });
-  }
-  return { total, snapshots };
-};
+// gateway initialize
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-exports.placeOrderCOD = async (req, res, next) => {
-  try {
-    const userId = req.userId;
-    const { items, address, amount, paymentMethod } = req.body;
-    if (!items || !address || !paymentMethod) return res.status(400).json({ message: 'Missing order data' });
+const razorpayInstance = new razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
-    const { total, snapshots } = await getServerTotalAndSnapshots(items);
-    // server must compute total; compare to provided amount as a guard
-    if (Number(amount) !== Number(total)) {
-      return res.status(400).json({ message: 'Amount mismatch' });
-    }
-
-    const order = await Order.create({ userId, items: snapshots, amount: total, address, paymentMethod: 'COD', payment: false, status: 'Order Placed' });
-    res.status(201).json({ success: true, order });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.userOrders = async (req, res, next) => {
-  try {
-    const userId = req.userId;
-    const orders = await Order.find({ userId }).sort({ date: -1 });
-    res.json({ success: true, orders });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.adminListOrders = async (req, res, next) => {
-  try {
-    const orders = await Order.find({}).sort({ date: -1 }).populate('userId', 'name email');
-    res.json({ success: true, orders });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.adminUpdateStatus = async (req, res, next) => {
-  try {
-    const { orderId, status } = req.body;
-    if (!orderId || !status) return res.status(400).json({ message: 'orderId and status required' });
-    if (!ALLOWED_STATUSES.includes(status)) return res.status(400).json({ message: 'Invalid status' });
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-    order.status = status;
-    await order.save();
-    res.json({ success: true, order });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// Stripe: create checkout session and create a pending order
-exports.createStripeSession = async (req, res, next) => {
-  try {
-    if (!process.env.STRIPE_SECRET_KEY || !process.env.FRONTEND_URL) return res.status(500).json({ message: 'Stripe or FRONTEND_URL not configured' });
-    const stripe = stripeLib(process.env.STRIPE_SECRET_KEY);
-    const userId = req.userId;
-    const { items, address } = req.body;
-    if (!items || !address) return res.status(400).json({ message: 'Missing items or address' });
-
-    const { total, snapshots } = await getServerTotalAndSnapshots(items);
-
-    // create pending order
-    const order = await Order.create({ userId, items: snapshots, amount: total, address, paymentMethod: 'Stripe', payment: false, status: 'Order Placed' });
-
-    // create Stripe Checkout Session
-    const line_items = snapshots.map(it => ({ price_data: { currency: 'usd', product_data: { name: it.name }, unit_amount: Math.round(it.price * 100) }, quantity: it.quantity }));
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items,
-      mode: 'payment',
-      success_url: `${process.env.FRONTEND_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}&orderId=${order._id}`,
-      cancel_url: `${process.env.FRONTEND_URL}/payment-cancel?orderId=${order._id}`,
-      metadata: { orderId: String(order._id) }
-    });
-
-    // persist stripe session id on the order for later verification and idempotency
-    await Order.findByIdAndUpdate(order._id, { $set: { 'paymentDetails.sessionId': session.id } });
-
-    res.json({ success: true, url: session.url, sessionId: session.id });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.verifyStripe = async (req, res, next) => {
-  try {
-    if (!process.env.STRIPE_SECRET_KEY) return res.status(500).json({ message: 'Stripe not configured' });
-    const stripe = stripeLib(process.env.STRIPE_SECRET_KEY);
-    const { sessionId, orderId } = req.body;
-    if (!sessionId || !orderId) return res.status(400).json({ message: 'sessionId and orderId required' });
-
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (session.payment_status === 'paid') {
-      // Idempotent update: only mark as paid if not already paid
-      const updated = await Order.findOneAndUpdate(
-        { _id: orderId, payment: { $ne: true } },
-        { $set: { payment: true, paymentDetails: { provider: 'stripe', sessionId: session.id }, paidAt: new Date() } },
-        { new: true }
-      );
-      // If updated is null, the order was already marked paid or not found
-      if (!updated) {
-        const existing = await Order.findById(orderId);
-        if (!existing) return res.status(404).json({ message: 'Order not found' });
-        return res.json({ success: true, order: existing, message: 'Order already marked paid' });
-      }
-      return res.json({ success: true, order: updated });
-    }
-    res.status(400).json({ message: 'Payment not completed' });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// Razorpay: create order and verify signature
-exports.createRazorpayOrder = async (req, res, next) => {
-  try {
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET || !process.env.FRONTEND_URL) return res.status(500).json({ message: 'Razorpay not configured' });
-    const instance = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
-    const userId = req.userId;
-    const { items, address } = req.body;
-    if (!items || !address) return res.status(400).json({ message: 'Missing items or address' });
-
-    const { total, snapshots } = await getServerTotalAndSnapshots(items);
-
-    // create pending order
-    const order = await Order.create({ userId, items: snapshots, amount: total, address, paymentMethod: 'Razorpay', payment: false, status: 'Order Placed' });
-
-    const options = {
-      amount: Math.round(total * 100),
-      currency: 'INR',
-      receipt: String(order._id),
-    };
-    const razorOrder = await instance.orders.create(options);
-    res.json({ success: true, razorOrder, key: process.env.RAZORPAY_KEY_ID, orderId: order._id });
-  } catch (err) {
-    next(err);
-  }
-};
-
-exports.verifyRazorpay = async (req, res, next) => {
-  try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, orderId } = req.body;
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !orderId) return res.status(400).json({ message: 'Missing verification parameters' });
-    const generated_signature = crypto.createHmac('sha256', process.env.RAZORPAY_KEY_SECRET).update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex');
-    if (generated_signature !== razorpay_signature) return res.status(400).json({ message: 'Invalid signature' });
-    // Idempotent update: mark paid only if not already paid
-    const updated = await Order.findOneAndUpdate(
-      { _id: orderId, payment: { $ne: true } },
-      { $set: { payment: true, paymentDetails: { provider: 'razorpay', razorpay_order_id, razorpay_payment_id }, paidAt: new Date() } },
-      { new: true }
-    );
-    if (!updated) {
-      const existing = await Order.findById(orderId);
-      if (!existing) return res.status(404).json({ message: 'Order not found' });
-      return res.json({ success: true, order: existing, message: 'Order already marked paid' });
-    }
-    res.json({ success: true, order: updated });
-  } catch (err) {
-    next(err);
-  }
-};
-
-
-exports.stripeWebhook = async (req, res) => {
-  try {
-    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) return res.status(500).send('Stripe not configured');
-    const stripe = stripeLib(process.env.STRIPE_SECRET_KEY);
-    const sig = req.headers['stripe-signature'];
-    const raw = req.body; // raw body as Buffer
-    let event;
+// Placing orders using COD Method
+const placeOrder = async (req, res) => {
     try {
-      event = stripe.webhooks.constructEvent(raw, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-      console.error('Webhook signature verification failed:', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+        const { userId, items, amount, address } = req.body;
 
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const orderId = session.metadata && session.metadata.orderId;
-      if (orderId) {
-        // Idempotent update: only mark paid if not already
-        const updated = await Order.findOneAndUpdate(
-          { _id: orderId, payment: { $ne: true } },
-          { $set: { payment: true, paymentDetails: { provider: 'stripe', sessionId: session.id }, paidAt: new Date() } },
-          { new: true }
-        );
-        if (updated) {
-          console.log('Order marked paid via webhook', orderId);
+        const orderData = {
+            userId,
+            items,
+            address,
+            amount,
+            paymentMethod: 'COD',
+            payment: false,
+            date: Date.now(),
+        };
+
+        const newOrder = new orderModel(orderData);
+        await newOrder.save();
+
+        await userModel.findByIdAndUpdate(userId, { cartData: {} });
+
+        res.json({ success: true, message: 'Order Placed' });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// Placing orders using Stripe Method
+const placeOrderStripe = async (req, res) => {
+    try {
+        const { userId, items, amount, address } = req.body;
+        const { origin } = req.headers;
+
+        const orderData = {
+            userId,
+            items,
+            address,
+            amount,
+            paymentMethod: 'Stripe',
+            payment: false,
+            date: Date.now(),
+        };
+
+        const newOrder = new orderModel(orderData);
+        await newOrder.save();
+
+        const line_items = items.map((item) => ({
+            price_data: {
+                currency: currency,
+                product_data: {
+                    name: item.name,
+                },
+                unit_amount: item.price * 100,
+            },
+            quantity: item.quantity,
+        }));
+
+        line_items.push({
+            price_data: {
+                currency: currency,
+                product_data: {
+                    name: 'Delivery Charges',
+                },
+                unit_amount: deliveryCharge * 100,
+            },
+            quantity: 1,
+        });
+
+        const session = await stripe.checkout.sessions.create({
+            success_url: `${origin}/verify?success=true&orderId=${newOrder._id}`,
+            cancel_url: `${origin}/verify?success=false&orderId=${newOrder._id}`,
+            line_items,
+            mode: 'payment',
+        });
+
+        res.json({ success: true, session_url: session.url });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// Verify Stripe
+const verifyStripe = async (req, res) => {
+    const { orderId, success, userId } = req.body;
+    try {
+        if (success === 'true' || success === true) {
+            await orderModel.findByIdAndUpdate(orderId, { payment: true });
+            await userModel.findByIdAndUpdate(userId, { cartData: {} });
+            res.json({ success: true });
         } else {
-          console.log('Webhook received but order already marked paid or not found', orderId);
+            await orderModel.findByIdAndDelete(orderId);
+            res.json({ success: false });
         }
-      }
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
     }
+};
 
-    res.json({ received: true });
-  } catch (err) {
-    console.error('stripeWebhook error', err);
-    res.status(500).send('Webhook handler error');
-  }
-}
+// Placing orders using Razorpay Method
+const placeOrderRazorpay = async (req, res) => {
+    try {
+        const { userId, items, amount, address } = req.body;
+
+        const orderData = {
+            userId,
+            items,
+            address,
+            amount,
+            paymentMethod: 'Razorpay',
+            payment: false,
+            date: Date.now(),
+        };
+
+        const newOrder = new orderModel(orderData);
+        await newOrder.save();
+
+        const options = {
+            amount: amount * 100,
+            currency: 'INR',
+            receipt: newOrder._id.toString(),
+        };
+
+        await razorpayInstance.orders.create(options, (error, order) => {
+            if (error) {
+                console.log(error);
+                return res.json({ success: false, message: error });
+            }
+            res.json({ success: true, order });
+        });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+const verifyRazorpay = async (req, res) => {
+    try {
+        const { userId, razorpay_order_id } = req.body;
+
+        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
+        if (orderInfo.status === 'paid') {
+            await orderModel.findByIdAndUpdate(orderInfo.receipt, { payment: true });
+            await userModel.findByIdAndUpdate(userId, { cartData: {} });
+            res.json({ success: true, message: 'Payment Successful' });
+        } else {
+            res.json({ success: false, message: 'Payment Failed' });
+        }
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// All Orders data for Admin Panel
+const allOrders = async (req, res) => {
+    try {
+        const orders = await orderModel.find({});
+        res.json({ success: true, orders });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// User Order Data For Frontend
+const userOrders = async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const orders = await orderModel.find({ userId });
+        res.json({ success: true, orders });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// update order status from Admin Panel
+const updateStatus = async (req, res) => {
+    try {
+        const { orderId, status } = req.body;
+        await orderModel.findByIdAndUpdate(orderId, { status });
+        res.json({ success: true, message: 'Status Updated' });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+export {
+    verifyStripe,
+    verifyRazorpay,
+    placeOrder,
+    placeOrderStripe,
+    placeOrderRazorpay,
+    allOrders,
+    userOrders,
+    updateStatus,
+};

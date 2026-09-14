@@ -1,17 +1,18 @@
-const jwt = require('jsonwebtoken');
+import jwt from 'jsonwebtoken';
 
-module.exports = function (req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  if (!authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Authorization token missing' });
-  }
-  const token = authHeader.split(' ')[1];
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = payload.id;
-    req.isAdmin = payload.isAdmin || false;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
-  }
+const authUser = async (req, res, next) => {
+    const { token } = req.headers;
+    if (!token) {
+        return res.json({ success: false, message: 'Not Authorized Login Again' });
+    }
+    try {
+        const token_decode = jwt.verify(token, process.env.JWT_SECRET);
+        req.body.userId = token_decode.id;
+        next();
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
 };
+
+export default authUser;

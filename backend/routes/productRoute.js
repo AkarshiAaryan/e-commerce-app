@@ -1,41 +1,18 @@
-const express = require('express');
-const router = express.Router();
-const productController = require('../controllers/productController');
-const auth = require('../middleware/auth');
-const adminAuth = require('../middleware/adminAuth');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+import express from 'express';
+import { listProducts, addProduct, removeProduct, singleProduct } from '../controllers/productController.js';
+import upload from '../middleware/multer.js';
+import adminAuth from '../middleware/adminAuth.js';
 
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const productRouter = express.Router();
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  }
-});
+productRouter.post('/add', adminAuth, upload.fields([
+    { name: 'image1', maxCount: 1 },
+    { name: 'image2', maxCount: 1 },
+    { name: 'image3', maxCount: 1 },
+    { name: 'image4', maxCount: 1 }
+]), addProduct);
+productRouter.post('/remove', adminAuth, removeProduct);
+productRouter.post('/single', singleProduct);
+productRouter.get('/list', listProducts);
 
-// Accept images only and limit size to 5MB each
-const fileFilter = (req, file, cb) => {
-  if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-    return cb(new Error('Only image uploads are allowed'))
-  }
-  cb(null, true)
-}
-
-const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
-
-// Allow up to 4 images per product
-router.post('/add', auth, adminAuth, upload.array('images', 4), productController.addProduct);
-router.post('/remove', auth, adminAuth, productController.removeProduct);
-router.post('/list', productController.listProducts);
-router.post('/categories', productController.listCategories);
-router.post('/search', productController.searchProducts);
-router.post('/single', productController.singleProduct);
-
-module.exports = router;
+export default productRouter;

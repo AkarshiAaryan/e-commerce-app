@@ -1,42 +1,40 @@
 import React from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
-import AdminLogin from './pages/admin/AdminLogin'
-import AdminAdd from './pages/admin/AdminAdd'
-import AdminList from './pages/admin/AdminList'
-import AdminOrders from './pages/admin/AdminOrders'
-import AdminRoute from './components/AdminRoute'
 import Collection from './pages/Collection'
 import About from './pages/About'
 import Contact from './pages/Contact'
 import Product from './pages/Product'
 import Cart from './pages/Cart'
 import Login from './pages/Login'
-import Register from './pages/Register'
 import PlaceOrder from './pages/PlaceOrder'
 import Orders from './pages/Orders'
-import Profile from './pages/Profile'
-import PaymentSuccess from './pages/PaymentSuccess'
-import PaymentCancel from './pages/PaymentCancel'
+import Verify from './pages/Verify'
 import Navbar from './components/Navbar'
+import Footer from './components/Footer'
+import SearchBar from './components/SearchBar'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 
 const App = () => {
   return (
     <div className='px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]'>
+      <ToastContainer />
       <Navbar />
+      <SearchBar />
       <Routes>
-        <Route element={<Home />} path='/' />
-        <Route element={<Collection />} path='/collection' />
-        <Route element={<About />} path='/about' />
-        <Route element={<Contact />} path='/contact' />
-        <Route element={<Product />} path='/product/:productId' />
-        <Route element={<Cart />} path='/cart' />
-        <Route element={<Login />} path='/login' />
-        <Route element={<Register />} path='/register' />
-        <Route element={<PlaceOrder />} path='/place-order' />
-        <Route element={<Orders />} path='/orders' />
-        <Route element={<Profile />} path='/profile' />
+        <Route path='/' element={<Home />} />
+        <Route path='/collection' element={<Collection />} />
+        <Route path='/about' element={<About />} />
+        <Route path='/contact' element={<Contact />} />
+        <Route path='/product/:productId' element={<Product />} />
+        <Route path='/cart' element={<Cart />} />
+        <Route path='/login' element={<Login />} />
+        <Route path='/place-order' element={<PlaceOrder />} />
+        <Route path='/orders' element={<Orders />} />
+        <Route path='/verify' element={<Verify />} />
       </Routes>
+      <Footer />
     </div>
   )
 }

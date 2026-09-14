@@ -1,29 +1,33 @@
-const express = require('express');
-const router = express.Router();
-const { body } = require('express-validator');
-const orderController = require('../controllers/orderController');
-const auth = require('../middleware/auth');
-const adminAuth = require('../middleware/adminAuth');
-const validate = require('../middlewares/validate');
+import express from 'express';
+import {
+    placeOrder,
+    placeOrderStripe,
+    placeOrderRazorpay,
+    allOrders,
+    userOrders,
+    updateStatus,
+    verifyStripe,
+    verifyRazorpay
+} from '../controllers/orderController.js';
+import adminAuth from '../middleware/adminAuth.js';
+import authUser from '../middleware/auth.js';
 
-// Place order (COD)
-router.post('/place', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.placeOrderCOD);
+const orderRouter = express.Router();
 
-// User's orders
-router.post('/userorders', auth, orderController.userOrders);
+// Admin Features
+orderRouter.post('/list', adminAuth, allOrders);
+orderRouter.post('/status', adminAuth, updateStatus);
 
-// Admin list orders
-router.post('/list', auth, adminAuth, orderController.adminListOrders);
+// Payment Features
+orderRouter.post('/place', authUser, placeOrder);
+orderRouter.post('/stripe', authUser, placeOrderStripe);
+orderRouter.post('/razorpay', authUser, placeOrderRazorpay);
 
-// Admin update status
-router.post('/status', auth, adminAuth, orderController.adminUpdateStatus);
+// User Feature
+orderRouter.post('/userorders', authUser, userOrders);
 
-// Stripe
-router.post('/stripe', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.createStripeSession);
-router.post('/verifyStripe', [body('sessionId').notEmpty(), body('orderId').isMongoId()], validate, orderController.verifyStripe);
+// verify payment
+orderRouter.post('/verifyStripe', authUser, verifyStripe);
+orderRouter.post('/verifyRazorpay', authUser, verifyRazorpay);
 
-// Razorpay
-router.post('/razorpay', auth, [body('items').isArray({ min: 1 }), body('address').notEmpty()], validate, orderController.createRazorpayOrder);
-router.post('/verifyRazorpay', [body('razorpay_order_id').notEmpty(), body('razorpay_payment_id').notEmpty(), body('razorpay_signature').notEmpty(), body('orderId').isMongoId()], validate, orderController.verifyRazorpay);
-
-module.exports = router;
+export default orderRouter;

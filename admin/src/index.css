@@ -4,16 +4,14 @@
 
 body {
   font-family: 'Outfit', sans-serif;
-}
-
-.font-prata {
-  font-family: 'Prata', serif;
+  background-color: #fcfcfc;
 }
 
 ::-webkit-scrollbar {
   display: none;
 }
 
-a.active hr {
-  display: block;
+a.active {
+  background-color: #ffebf5;
+  border-color: #c585a7;
 }
